@@ -40,6 +40,7 @@ describe('Game Engine Reducer', () => {
       expect(newState.run).toBe(true);
       expect(newState.overlay).toBe(null);
       expect(newState.phase).toBe('main');
+      expect(newState.nodeCost).toBe(NODE_COST); // Reset node cost on game start
     });
   });
 
@@ -83,6 +84,7 @@ describe('Game Engine Reducer', () => {
       expect(newState.nodes[newState.nodes.length - 1].x).toBe(newNode.x);
       expect(newState.nodes[newState.nodes.length - 1].y).toBe(newNode.y);
       expect(newState.sats).toBe(state.sats - NODE_COST);
+      expect(newState.nodeCost).toBe(NODE_COST + 1); // Cost should increase by 1
     });
 
     it('should not buy a node when not enough satoshis', () => {
@@ -98,6 +100,26 @@ describe('Game Engine Reducer', () => {
       // Check that state remains unchanged
       expect(newState.nodes.length).toBe(state.nodes.length);
       expect(newState.sats).toBe(NODE_COST - 1);
+      expect(newState.nodeCost).toBe(state.nodeCost); // Cost remains the same
+    });
+
+    it('should increase node cost with each purchase', () => {
+      // Start the game
+      state = reducer(state, { t: 'START' });
+      
+      // Give player plenty of satoshis
+      state = { ...state, sats: 100 };
+      
+      // Buy first node
+      let newState = reducer(state, { t: 'BUY', x: 500, y: 500 });
+      expect(newState.nodeCost).toBe(NODE_COST + 1);
+      expect(newState.sats).toBe(state.sats - NODE_COST);
+      
+      // Buy second node
+      const secondNodeCost = newState.nodeCost;
+      newState = reducer(newState, { t: 'BUY', x: 550, y: 550 });
+      expect(newState.nodeCost).toBe(secondNodeCost + 1);
+      expect(newState.sats).toBe(state.sats - NODE_COST - secondNodeCost);
     });
   });
 
@@ -331,6 +353,86 @@ describe('Game Engine Reducer', () => {
       expect(newState.nodes[1]).toEqual(state.nodes[1]);
       expect(newState.nodes[2]).toEqual(state.nodes[2]);
       expect(newState.nodes[3]).toEqual(state.nodes[3]);
+    });
+  });
+
+  describe('Game Over Conditions', () => {
+    it('should trigger game over when fewer than 2 alive nodes remain after a disaster', () => {
+      // Start the game
+      state = reducer(state, { t: 'START' });
+      
+      // Set up a state with only 2 alive nodes
+      state = {
+        ...state,
+        nodes: [
+          createTestNode(0, 100, 100, true),
+          createTestNode(1, 200, 200, true),
+          createTestNode(2, 300, 300, false),
+          createTestNode(3, 400, 400, false)
+        ]
+      };
+      
+      // Create a disaster that kills one of the remaining nodes
+      const disaster = { 
+        t: 'DIS' as const, 
+        sp: { cx: 120, cy: 120, r: 50, t: Date.now() }, 
+        txt: 'Test Disaster', 
+        col: '#ff0000' 
+      };
+      
+      const newState = reducer(state, disaster);
+      
+      expect(newState.phase).toBe('gameover');
+      expect(newState.run).toBe(false);
+      expect(newState.overlay).toBe('Network Failure. Too few nodes remain to sustain decentralization.');
+    });
+
+    it('should trigger game over when a failed upgrade leaves fewer than 2 nodes alive', () => {
+      // Start the game
+      state = reducer(state, { t: 'START' });
+      
+      // Set up a state with only 2 alive nodes and one clicked
+      state = {
+        ...state,
+        phase: 'challenge',
+        nodes: [
+          createTestNode(0, 100, 100, true),
+          createTestNode(1, 200, 200, true),
+          createTestNode(2, 300, 300, false),
+          createTestNode(3, 400, 400, false)
+        ],
+        clicked: new Set([0]) // Only one node clicked, so upgrade will fail
+      };
+      
+      const newState = reducer(state, { t: 'END_CHAL' });
+      
+      expect(newState.phase).toBe('gameover');
+      expect(newState.run).toBe(false);
+      expect(newState.overlay).toBe('Network Failure. Too few nodes remain to sustain decentralization.');
+    });
+
+    it('should reset from game over state when START action is dispatched', () => {
+      // Setup game over state
+      state = {
+        ...state,
+        phase: 'gameover',
+        run: false,
+        overlay: 'Network Failure. Too few nodes remain to sustain decentralization.',
+        nodes: [
+          createTestNode(0, 100, 100, true),
+          createTestNode(1, 200, 200, false),
+          createTestNode(2, 300, 300, false),
+          createTestNode(3, 400, 400, false)
+        ]
+      };
+      
+      const newState = reducer(state, { t: 'START' });
+      
+      expect(newState.phase).toBe('main');
+      expect(newState.run).toBe(true);
+      expect(newState.overlay).toBe(null);
+      expect(newState.nodes.length).toBe(12); // Default node count
+      expect(newState.nodes.every(n => n.alive)).toBe(true); // All nodes alive
     });
   });
 }); 
